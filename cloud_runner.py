@@ -83,32 +83,38 @@ def fetch_prices():
         "include_7d_change": "true",
         "include_market_cap": "true",
         "include_24hr_vol": "true",
+        "price_change_percentage": "24h,7d",
     })
     if not d: return {}, {}
 
+    def extract(cid):
+        if cid not in d: return None
+        coin = d[cid]
+        # Try multiple field name variants for 7d change
+        d7 = (coin.get("usd_7d_change") or
+              coin.get("usd_7d_change_in_currency") or
+              coin.get("price_change_percentage_7d_in_currency") or 0)
+        h24 = (coin.get("usd_24h_change") or
+               coin.get("usd_24h_change_in_currency") or 0)
+        return {
+            "sgd":  coin.get("sgd", 0),
+            "usd":  coin.get("usd", 0),
+            "h24":  round(h24, 2),
+            "d7":   round(d7, 2),
+            "vol":  coin.get("usd_24h_vol", 0),
+            "mcap": coin.get("usd_market_cap", 0),
+        }
+
     port_px = {}
     for t, cid in CG.items():
-        if cid in d:
-            port_px[t] = {
-                "sgd": d[cid].get("sgd", 0),
-                "usd": d[cid].get("usd", 0),
-                "h24": d[cid].get("usd_24h_change", 0),
-                "d7":  d[cid].get("usd_7d_change", 0),
-                "vol": d[cid].get("usd_24h_vol", 0),
-                "mcap":d[cid].get("usd_market_cap", 0),
-            }
+        result = extract(cid)
+        if result: port_px[t] = result
 
     watch_px = {}
     for t, cid in WATCHLIST.items():
-        if cid in d:
-            watch_px[t] = {
-                "sgd": d[cid].get("sgd", 0),
-                "usd": d[cid].get("usd", 0),
-                "h24": d[cid].get("usd_24h_change", 0),
-                "d7":  d[cid].get("usd_7d_change", 0),
-                "vol": d[cid].get("usd_24h_vol", 0),
-                "mcap":d[cid].get("usd_market_cap", 0),
-            }
+        result = extract(cid)
+        if result: watch_px[t] = result
+
     return port_px, watch_px
 
 def fetch_fg():
