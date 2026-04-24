@@ -62,59 +62,42 @@ def tg(text):
     except Exception as e:
         print(f"  [error] {e}")
 
-# ── Fetch prices — single reliable call ────────────────────────────────
+# ── Fetch prices — single call, SGD + 24h + 7d ─────────────────────────
 def fetch_prices():
     all_ids = list(CG.values()) + list(WATCHLIST.values())
 
-    # Get SGD prices + 24h change from simple/price (always works)
-    sgd_data = get("https://api.coingecko.com/api/v3/simple/price", {
-        "ids": ",".join(all_ids),
-        "vs_currencies": "sgd,usd",
-        "include_24hr_change": "true",
-        "include_market_cap": "true",
-        "include_24hr_vol": "true",
+    # ONE call to markets endpoint with SGD — returns everything
+    data = get("https://api.coingecko.com/api/v3/coins/markets", {
+        "vs_currency":            "sgd",
+        "ids":                    ",".join(all_ids),
+        "order":                  "market_cap_desc",
+        "per_page":               "50",
+        "page":                   "1",
+        "sparkline":              "false",
+        "price_change_percentage":"24h,7d",
     })
+    if not data:
+        return {}, {}
 
-    # Get 7d change from markets endpoint separately
-    mkt_data = get("https://api.coingecko.com/api/v3/coins/markets", {
-        "vs_currency": "usd",
-        "ids": ",".join(all_ids),
-        "price_change_percentage": "7d",
-        "sparkline": "false",
-    }, delay=1.5)
-
-    # Build 7d lookup
-    d7_map = {}
-    if mkt_data:
-        for coin in mkt_data:
-            cid = coin.get("id","")
-            d7_map[cid] = round(
-                coin.get("price_change_percentage_7d_in_currency") or 0, 2
-            )
-
-    def build(cid):
-        if not sgd_data or cid not in sgd_data:
-            return None
-        c = sgd_data[cid]
-        return {
-            "sgd":  c.get("sgd", 0),
-            "usd":  c.get("usd", 0),
-            "h24":  round(c.get("sgd_24h_change") or c.get("usd_24h_change") or 0, 2),
-            "d7":   d7_map.get(cid, 0),
-            "vol":  c.get("usd_24h_vol", 0),
-            "mcap": c.get("usd_market_cap", 0),
+    # Build lookup by coin id
+    by_id = {}
+    for coin in data:
+        cid = coin.get("id","")
+        h24 = coin.get("price_change_percentage_24h") or 0
+        d7  = coin.get("price_change_percentage_7d_in_currency") or 0
+        by_id[cid] = {
+            "sgd":  coin.get("current_price", 0),
+            "usd":  coin.get("current_price", 0),  # sgd mode
+            "h24":  round(float(h24), 2),
+            "d7":   round(float(d7),  2),
+            "vol":  coin.get("total_volume", 0),
+            "mcap": coin.get("market_cap", 0),
         }
+        print(f"    {cid[:12]:<14} SGD={coin.get('current_price',0):.4f}  "
+              f"24h={h24:+.2f}%  7d={d7:+.2f}%")
 
-    port_px  = {}
-    for t, cid in CG.items():
-        r = build(cid)
-        if r: port_px[t] = r
-
-    watch_px = {}
-    for t, cid in WATCHLIST.items():
-        r = build(cid)
-        if r: watch_px[t] = r
-
+    port_px  = {t: by_id[cid] for t, cid in CG.items()       if cid in by_id}
+    watch_px = {t: by_id[cid] for t, cid in WATCHLIST.items() if cid in by_id}
     return port_px, watch_px
 
 def fetch_fg():
