@@ -21,3 +21,4 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           CG_API_KEY: ${{ secrets.CG_API_KEY }}
         run: python signal.py
+
