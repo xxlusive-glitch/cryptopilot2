@@ -93,25 +93,41 @@ def fetch_prices():
     port_px  = {}
     watch_px = {}
 
+    # Build initial price data with 24h change
     for cid, vals in d.items():
         ticker = cid_to_ticker.get(cid)
         if not ticker: continue
-
-        sgd = float(vals.get("sgd", 0) or 0)
-        h24 = float(vals.get("sgd_24h_change") or
-                    vals.get("usd_24h_change") or 0)
-        d7  = float(vals.get("sgd_7d_change")  or
-                    vals.get("usd_7d_change")   or 0)
-        vol  = float(vals.get("sgd_24h_vol", 0)    or 0)
+        sgd  = float(vals.get("sgd", 0) or 0)
+        h24  = float(vals.get("sgd_24h_change") or vals.get("usd_24h_change") or 0)
+        vol  = float(vals.get("sgd_24h_vol", 0) or 0)
         mcap = float(vals.get("sgd_market_cap", 0) or 0)
-
-        data = {"sgd":round(sgd,6),"h24":round(h24,2),
-                "d7":round(d7,2),"vol":vol,"mcap":mcap}
-
-        print(f"  {ticker:<6} SGD={sgd:.4f}  24h={h24:+.2f}%  7d={d7:+.2f}%")
-
-        if ticker in PORT:    port_px[ticker]  = data
+        data = {"sgd":round(sgd,6),"h24":round(h24,2),"d7":0.0,"vol":vol,"mcap":mcap}
+        if ticker in PORT:      port_px[ticker]  = data
         if ticker in WATCHLIST: watch_px[ticker] = data
+
+    # Calculate 7d change from market_chart (8 days daily data)
+    all_tickers = {**{t:cid for t,cid in CG_IDS.items() if t in port_px or t in watch_px}}
+    for ticker, cid in all_tickers.items():
+        try:
+            chart = get(
+                f"https://api.coingecko.com/api/v3/coins/{cid}/market_chart",
+                {"vs_currency":"sgd","days":"8","interval":"daily"},
+                delay=0.5
+            )
+            if chart and "prices" in chart and len(chart["prices"]) >= 2:
+                price_now = chart["prices"][-1][1]
+                price_7d  = chart["prices"][0][1]
+                if price_7d > 0:
+                    d7 = round((price_now - price_7d) / price_7d * 100, 2)
+                    if ticker in port_px:  port_px[ticker]["d7"]  = d7
+                    if ticker in watch_px: watch_px[ticker]["d7"] = d7
+        except Exception as e:
+            print(f"  [warn] 7d chart {ticker}: {e}")
+
+    for ticker, data in {**port_px, **watch_px}.items():
+        if ticker != "USDT":
+            print(f"  {ticker:<6} SGD={data['sgd']:.4f}  "
+                  f"24h={data['h24']:+.2f}%  7d={data['d7']:+.2f}%")
 
     return port_px, watch_px
 
