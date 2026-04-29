@@ -12,38 +12,45 @@ def load_cfg():
         except: pass
     return {}
 
-cfg  = load_cfg()
-BOT  = os.environ.get("BOT_TOKEN") or cfg.get("bot_token","")
-CHAT = os.environ.get("CHAT_ID")   or cfg.get("chat_id","")
+cfg    = load_cfg()
+BOT    = os.environ.get("BOT_TOKEN")  or cfg.get("bot_token","")
+CHAT   = os.environ.get("CHAT_ID")    or cfg.get("chat_id","")
+CG_KEY = os.environ.get("CG_API_KEY") or cfg.get("cg_api_key","")
 
 PORT = {
-    "ETH":  {"qty":4.6063,      "cost":4672.35, "stop":2280.0,    "trim":3750.0,  "tier":"large"},
-    "XRP":  {"qty":5797.74,     "cost":2.80,    "stop":1.42,      "trim":2.65,    "tier":"large"},
-    "NEAR": {"qty":3306.68,     "cost":8.01,    "stop":1.45,      "trim":2.80,    "tier":"mid"},
-    "DOGE": {"qty":44345.5,     "cost":0.1645,  "stop":0.092,     "trim":0.195,   "tier":"mid"},
-    "ADA":  {"qty":5461.4,      "cost":0.6466,  "stop":0.235,     "trim":0.48,    "tier":"mid"},
-    "USDT": {"qty":4753.4,      "cost":1.27,    "stop":None,      "trim":None,    "tier":"stable"},
-    "TRUMP":{"qty":26.84,       "cost":2.80,    "stop":2.50,      "trim":5.00,    "tier":"micro"},
-    "SHIB": {"qty":11614382.62, "cost":0.000035,"stop":0.0000055, "trim":0.000015,"tier":"micro","decimals":10},
+    "ETH":  {"qty":4.6063,      "cost":4672.35, "stop":2280.0,    "trim":3750.0,   "tier":"large"},
+    "XRP":  {"qty":5797.74,     "cost":2.80,    "stop":1.42,      "trim":2.65,     "tier":"large"},
+    "NEAR": {"qty":3306.68,     "cost":8.01,    "stop":1.45,      "trim":2.80,     "tier":"mid"},
+    "DOGE": {"qty":44345.5,     "cost":0.1645,  "stop":0.092,     "trim":0.195,    "tier":"mid"},
+    "ADA":  {"qty":5461.4,      "cost":0.6466,  "stop":0.235,     "trim":0.48,     "tier":"mid"},
+    "USDT": {"qty":4753.4,      "cost":1.27,    "stop":None,      "trim":None,     "tier":"stable"},
+    "TRUMP":{"qty":26.84,       "cost":2.80,    "stop":2.50,      "trim":5.00,     "tier":"micro"},
+    "SHIB": {"qty":11614382.62, "cost":0.000035,"stop":0.0000055, "trim":0.000015, "tier":"micro"},
 }
 
-CG = {
-    "ETH":"ethereum","XRP":"ripple","NEAR":"near","DOGE":"dogecoin",
-    "ADA":"cardano","BTC":"bitcoin","TRUMP":"official-trump","SHIB":"shiba-inu",
+CG_IDS = {
+    "ETH":"ethereum",  "XRP":"ripple",       "NEAR":"near",
+    "DOGE":"dogecoin", "ADA":"cardano",       "BTC":"bitcoin",
+    "TRUMP":"official-trump",                 "SHIB":"shiba-inu",
+    "SOL":"solana",    "BNB":"binancecoin",   "AVAX":"avalanche-2",
+    "LINK":"chainlink",
 }
-
-WATCHLIST = {
-    "SOL":"solana","BNB":"binancecoin","AVAX":"avalanche-2",
-    "LINK":"chainlink","MATIC":"matic-network",
-}
+WATCHLIST = {"SOL","BNB","AVAX","LINK"}
 
 RE = {"expansion":"🟢","caution":"🟡","contraction":"🔴","recovery":"🔵"}
+AE = {"ACCUMULATE":"🟢","HOLD":"🔵","WATCH":"🟡","TRIM":"🟠","DE-RISK":"🔴"}
+
+def cg_headers():
+    h = {"User-Agent":"CryptoPilotAI/8.0"}
+    if CG_KEY:
+        h["x-cg-demo-api-key"] = CG_KEY
+    return h
 
 def get(url, params=None, delay=1.0):
     time.sleep(delay)
     try:
-        r = requests.get(url, params=params or {}, timeout=20,
-                         headers={"User-Agent":"CryptoPilotAI/6.0"})
+        r = requests.get(url, params=params or {},
+                        headers=cg_headers(), timeout=20)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -62,62 +69,50 @@ def tg(text):
     except Exception as e:
         print(f"  [error] {e}")
 
-# ── Fetch prices — SGD current + 24h + 7d calculated ───────────────────
+# ── Prices — CoinGecko Demo key unlocks usd_7d_change ───────────────────
 def fetch_prices():
-    all_ids = list(CG.values()) + list(WATCHLIST.values())
-    ids_str = ",".join(all_ids)
+    ids_str = ",".join(CG_IDS.values())
+    print(f"  CG key: {'set' if CG_KEY else 'NOT SET — 7d may be missing'}")
 
-    # Call 1: current SGD prices + 24h change
-    now_data = get("https://api.coingecko.com/api/v3/simple/price", {
-        "ids":              ids_str,
-        "vs_currencies":    "sgd",
-        "include_24hr_change": "true",
-        "include_market_cap":  "true",
-        "include_24hr_vol":    "true",
+    d = get("https://api.coingecko.com/api/v3/simple/price", {
+        "ids":                  ids_str,
+        "vs_currencies":        "sgd",
+        "include_24hr_change":  "true",
+        "include_7d_change":    "true",
+        "include_market_cap":   "true",
+        "include_24hr_vol":     "true",
     })
-
-    # Call 2: market chart for 7d — use BTC as proxy then get others
-    # Get 7d via coins/markets with explicit price_change_percentage
-    mkt = get("https://api.coingecko.com/api/v3/coins/markets", {
-        "vs_currency": "sgd",
-        "ids":         ids_str,
-        "sparkline":   "false",
-        "price_change_percentage": "7d",
-    }, delay=2.0)
-
-    # Build 7d map from markets response
-    d7_map = {}
-    if mkt:
-        for coin in mkt:
-            cid = coin.get("id","")
-            # Try both field names
-            d7 = (coin.get("price_change_percentage_7d_in_currency") or
-                  coin.get("price_change_percentage_7d") or 0)
-            d7_map[cid] = round(float(d7), 2)
-
-    if not now_data:
+    if not d:
+        print("  [warn] Price fetch failed")
         return {}, {}
 
-    by_id = {}
-    for cid, vals in now_data.items():
-        sgd   = vals.get("sgd", 0) or 0
-        h24   = vals.get("sgd_24h_change", 0) or 0
-        d7    = d7_map.get(cid, 0)
-        vol   = vals.get("sgd_24h_vol", 0) or 0
-        mcap  = vals.get("sgd_market_cap", 0) or 0
-        by_id[cid] = {
-            "sgd":  round(sgd,  6),
-            "usd":  round(sgd,  6),
-            "h24":  round(h24,  2),
-            "d7":   round(d7,   2),
-            "vol":  vol,
-            "mcap": mcap,
-        }
-        print(f"    {cid[:14]:<16} SGD={sgd:.4f}  "
-              f"24h={h24:+.2f}%  7d={d7:+.2f}%")
+    first = list(d.values())[0]
+    print(f"  Fields: {list(first.keys())}")
 
-    port_px  = {t: by_id[cid] for t, cid in CG.items()       if cid in by_id}
-    watch_px = {t: by_id[cid] for t, cid in WATCHLIST.items() if cid in by_id}
+    cid_to_ticker = {v:k for k,v in CG_IDS.items()}
+    port_px  = {}
+    watch_px = {}
+
+    for cid, vals in d.items():
+        ticker = cid_to_ticker.get(cid)
+        if not ticker: continue
+
+        sgd = float(vals.get("sgd", 0) or 0)
+        h24 = float(vals.get("sgd_24h_change") or
+                    vals.get("usd_24h_change") or 0)
+        d7  = float(vals.get("sgd_7d_change")  or
+                    vals.get("usd_7d_change")   or 0)
+        vol  = float(vals.get("sgd_24h_vol", 0)    or 0)
+        mcap = float(vals.get("sgd_market_cap", 0) or 0)
+
+        data = {"sgd":round(sgd,6),"h24":round(h24,2),
+                "d7":round(d7,2),"vol":vol,"mcap":mcap}
+
+        print(f"  {ticker:<6} SGD={sgd:.4f}  24h={h24:+.2f}%  7d={d7:+.2f}%")
+
+        if ticker in PORT:    port_px[ticker]  = data
+        if ticker in WATCHLIST: watch_px[ticker] = data
+
     return port_px, watch_px
 
 def fetch_fg():
@@ -137,63 +132,48 @@ def fetch_glb():
             "chg":round(d["data"].get("market_cap_change_percentage_24h_usd",0),2)}
 
 def fetch_trending():
-    d = get("https://api.coingecko.com/api/v3/search/trending", delay=1.0)
+    d = get("https://api.coingecko.com/api/v3/search/trending", delay=0.8)
     if not d: return []
-    out = []
-    for item in d.get("coins",[])[:6]:
-        c = item.get("item",{})
-        out.append({"sym":c.get("symbol","").upper(),"name":c.get("name","")})
-    return out
+    return [{"sym":item.get("item",{}).get("symbol","").upper()}
+            for item in d.get("coins",[])[:6]]
 
 def fetch_news():
-    try:
-        import feedparser
-    except:
-        return None
-    BULL = {"rally","surge","bull","buy","breakout","ath","record","adoption",
-            "approval","etf","institutional","accumulate","recover","gain",
-            "rise","bullish","partnership","launch","soar","pump"}
-    BEAR = {"crash","dump","fear","sell","drop","plunge","bear","hack","ban",
-            "warning","risk","decline","lawsuit","collapse","panic","bearish",
-            "liquidation","fraud","investigation","concern"}
-    FEEDS = [
-        ("CoinDesk",      "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-        ("CoinTelegraph", "https://cointelegraph.com/rss"),
-        ("Decrypt",       "https://decrypt.co/feed"),
-    ]
-    scores = []
-    mentions = {}
-    headlines = []
-    for source, url in FEEDS:
+    try: import feedparser
+    except: return None
+    BULL={"rally","surge","bull","buy","breakout","ath","record","adoption",
+          "approval","etf","institutional","accumulate","recover","gain",
+          "rise","bullish","partnership","launch","soar"}
+    BEAR={"crash","dump","fear","sell","drop","plunge","bear","hack","ban",
+          "warning","risk","decline","lawsuit","collapse","panic","bearish",
+          "liquidation","fraud","investigation","concern"}
+    FEEDS=[("CoinDesk","https://www.coindesk.com/arc/outboundfeeds/rss/"),
+           ("CoinTelegraph","https://cointelegraph.com/rss"),
+           ("Decrypt","https://decrypt.co/feed")]
+    scores=[]; mentions={}; headlines=[]
+    for _,url in FEEDS:
         try:
-            feed = feedparser.parse(url)
+            feed=feedparser.parse(url)
             for e in feed.entries[:12]:
-                title = e.get("title","")
-                words = set(title.lower().split())
-                b = len(words & BULL)
-                br = len(words & BEAR)
-                sc = (b-br)/(b+br) if (b+br)>0 else 0
+                title=e.get("title","")
+                words=set(title.lower().split())
+                b=len(words&BULL); br=len(words&BEAR)
+                sc=(b-br)/(b+br) if (b+br)>0 else 0
                 scores.append(sc)
-                if sc > 0.2:
-                    headlines.append(title)
-                tu = title.upper()
-                for tok in list(CG.keys())+list(WATCHLIST.keys()):
-                    if tok in tu:
-                        mentions[tok] = mentions.get(tok,0)+1
-            time.sleep(0.5)
-        except:
-            pass
+                if sc>0.2: headlines.append(title)
+                for tok in list(PORT.keys())+list(WATCHLIST):
+                    if tok in title.upper():
+                        mentions[tok]=mentions.get(tok,0)+1
+            time.sleep(0.3)
+        except: pass
     if not scores: return None
-    avg = sum(scores)/len(scores)
-    return {
-        "avg":      round(avg,3),
-        "label":    "BULLISH" if avg>0.15 else "BEARISH" if avg<-0.15 else "NEUTRAL",
-        "count":    len(scores),
-        "mentions": dict(sorted(mentions.items(),key=lambda x:-x[1])[:5]),
-        "headlines":headlines[:2],
-    }
+    avg=sum(scores)/len(scores)
+    return {"avg":round(avg,3),
+            "label":"BULLISH" if avg>0.15 else "BEARISH" if avg<-0.15 else "NEUTRAL",
+            "count":len(scores),
+            "mentions":dict(sorted(mentions.items(),key=lambda x:-x[1])[:5]),
+            "headlines":headlines[:2]}
 
-def regime(px, f, g):
+def regime(px,f,g):
     v={"expansion":0.0,"caution":0.0,"contraction":0.0,"recovery":0.0}
     if f:
         fv=f["val"]
@@ -230,7 +210,7 @@ def regime(px, f, g):
     if conf<45: reg,conf="caution",45
     return reg,conf
 
-def score_coin(t, pos, px, f, reg):
+def score_coin(t,pos,px,f,reg):
     if pos["tier"]=="stable": return None
     p=px.get(t,{}).get("sgd",0)
     if p<=0: return None
@@ -279,16 +259,21 @@ def score_coin(t, pos, px, f, reg):
     elif sc>=42: act="WATCH"
     elif sc>=27: act="TRIM"
     else:        act="DE-RISK"
-    EM={"ACCUMULATE":"🟢","HOLD":"🔵","WATCH":"🟡","TRIM":"🟠","DE-RISK":"🔴"}
-    return {"t":t,"sc":sc,"act":act,"em":EM[act],"pnl":round(pnl,1),
-            "p":p,"h24":h24,"d7":d7,"stop":st,"trim":pos.get("trim"),
+    def fmt(v):
+        if v is None: return "—"
+        if v<0.0001:  return f"S${v:.8f}"
+        if v<0.01:    return f"S${v:.6f}"
+        return f"S${v:.4f}"
+    return {"t":t,"sc":sc,"act":act,"em":AE[act],"pnl":round(pnl,1),
+            "p":p,"h24":h24,"d7":d7,
+            "sf":fmt(st),"tf":fmt(pos.get("trim")),
             "bar":"█"*round(sc/10)+"░"*(10-round(sc/10))}
 
 def port_val(px):
     tot=0.0; uval=0.0; hold=[]; alts=[]
     for t,pos in PORT.items():
         qty=pos["qty"]
-        p=px.get(t,{}).get("sgd",0) if t!="USDT" else 1.27
+        p=px.get(t,{}).get("sgd",0) if t!="USDT" else 1.35
         val=qty*p; tot+=val
         if t=="USDT": uval=val; continue
         cost=qty*pos["cost"]
@@ -297,9 +282,9 @@ def port_val(px):
         st=pos.get("stop"); tr=pos.get("trim")
         if st and p>0:
             pct=(p-st)/st*100
-            if p<=st:   alts.append(f"🚨 STOP-LOSS: {t} S${p:.4f} BELOW S${st:.4f} — SELL NOW")
+            if p<=st:   alts.append(f"🚨 STOP-LOSS: {t} SELL NOW — S${p:.4f} below S${st:.4f}")
             elif pct<5: alts.append(f"⚠️ NEAR STOP: {t} S${p:.4f} — {pct:.1f}% above S${st:.4f}")
-        if tr and p>=tr: alts.append(f"✅ TRIM TARGET: {t} S${p:.4f} hit S${tr:.4f}")
+        if tr and p>=tr: alts.append(f"✅ TRIM: {t} S${p:.4f} hit S${tr:.4f}")
     up=round(uval/tot*100,1) if tot>0 else 0
     return round(tot,2),up,hold,alts
 
@@ -307,103 +292,70 @@ def early_signals(watch_px):
     out=[]
     for t,p in watch_px.items():
         h24=p.get("h24",0); d7=p.get("d7",0)
-        vol=p.get("vol",0); mcap=p.get("mcap",1)
-        vr=vol/mcap if mcap>0 else 0
         sc=0; reasons=[]
-        if h24>=5:    sc+=2; reasons.append(f"+{h24:.1f}% today")
-        elif h24>=3:  sc+=1; reasons.append(f"+{h24:.1f}% today")
-        if d7>=10:    sc+=2; reasons.append(f"+{d7:.1f}% this week")
-        elif d7>=5:   sc+=1; reasons.append(f"+{d7:.1f}% this week")
-        if vr>0.15:   sc+=2; reasons.append("high volume")
-        elif vr>0.08: sc+=1; reasons.append("elevated volume")
-        if sc>=3:
-            out.append({"t":t,"sc":sc,"p":p.get("sgd",0),
-                        "h24":h24,"d7":d7,"r":", ".join(reasons)})
+        if h24>=5:   sc+=2; reasons.append(f"+{h24:.1f}% today")
+        elif h24>=3: sc+=1; reasons.append(f"+{h24:.1f}% today")
+        if d7>=10:   sc+=2; reasons.append(f"+{d7:.1f}% this week")
+        elif d7>=5:  sc+=1; reasons.append(f"+{d7:.1f}% this week")
+        if sc>=3: out.append({"t":t,"sc":sc,"p":p.get("sgd",0),
+                               "h24":h24,"d7":d7,"r":", ".join(reasons)})
     return sorted(out,key=lambda x:-x["sc"])
 
-def build(reg, conf, f, g, sigs, tot, up, alts,
-          news, trending, signals, watch_px):
+def build(reg,conf,f,g,sigs,tot,up,alts,news,trending,signals,watch_px):
     ts=sgt()
     cb="█"*round(conf/10)+"░"*(10-round(conf/10))
     fv=f["val"] if f else "?"; fl=f["lbl"] if f else "?"
     ft=f["trend"] if f else ""; f7=f["avg"] if f else "?"
     dom=g["dom"] if g else "?"; mc=g["chg"] if g else 0
-
-    L=[
-        f"<b>🤖 CryptoPilot AI</b>",
-        f"📅 {ts}",
-        f"",
-        f"{RE.get(reg,'⚪')} <b>REGIME: {reg.upper()}</b>",
-        f"  Confidence : {cb} {conf}%",
-        f"",
-        f"<b>📊 Market</b>",
-        f"  Fear &amp; Greed  : {fv} ({fl}) {ft}",
-        f"  7d avg F&amp;G   : {f7}",
-        f"  BTC dominance : {dom}%  ({mc:+.1f}% 24h)",
-    ]
-
+    L=[f"<b>🤖 CryptoPilot AI</b>",f"📅 {ts}",f"",
+       f"{RE.get(reg,'⚪')} <b>REGIME: {reg.upper()}</b>",
+       f"  Confidence : {cb} {conf}%",f"",
+       f"<b>📊 Market</b>",
+       f"  Fear &amp; Greed  : {fv} ({fl}) {ft}",
+       f"  7d avg F&amp;G   : {f7}",
+       f"  BTC dominance : {dom}%  ({mc:+.1f}% 24h)",]
     if news:
-        L.append(f"  News sentiment : {news['label']} ({news['avg']:+.2f}) — {news['count']} articles")
-
+        L.append(f"  News : {news['label']} ({news['avg']:+.2f}) — {news['count']} articles")
     L+=[f"",f"<b>💼 Portfolio</b>",
         f"  Total  : S${tot:,.2f}",
         f"  USDT   : {up}%  {'✅' if up>=10 else '⚠️ TOP UP'}",
         f"",f"<b>📈 Coin signals</b>"]
-
     for s in sorted(sigs,key=lambda x:-x["sc"]):
-        def fmt(v):
-            if v is None: return "—"
-            if v < 0.0001: return f"S${v:.8f}"
-            if v < 0.01:   return f"S${v:.6f}"
-            return f"S${v:.4f}"
-        st=fmt(s.get("stop")); tr=fmt(s.get("trim"))
         L+=[f"  {s['em']} <b>{s['t']}</b>  {s['act']}  {s['sc']:.0f}/100",
             f"     {s['bar']}",
             f"     P&amp;L {s['pnl']:+.0f}%  7d {s['d7']:+.1f}%  24h {s['h24']:+.1f}%",
-            f"     Stop {st}  →  Trim {tr}"]
-
+            f"     Stop {s['sf']}  →  Trim {s['tf']}"]
     if alts:
         L+=[f"","<b>───────────────────────</b>"]
         for a in alts: L.append(f"  {a}")
     else:
         L+=[f"","✅ <b>All stop-losses safe</b>"]
-
-    # Early Entry Intelligence
     L+=[f"",f"<b>🔍 Early Entry Intelligence</b>"]
-
     if trending:
-        syms=" · ".join(t["sym"] for t in trending[:6])
-        L.append(f"  🔥 Trending now : {syms}")
-
+        L.append(f"  🔥 Trending : {' · '.join(t['sym'] for t in trending[:6])}")
     if signals:
-        L.append(f"  ⚡ Momentum movers (not in your portfolio):")
+        L.append(f"  ⚡ Momentum movers:")
         for s in signals[:3]:
-            L.append(f"    <b>{s['t']}</b> S${s['p']:.4f} — {s['r']}")
+            L.append(f"    <b>{s['t']}</b> S${s['p']:.3f} — {s['r']}")
     else:
         L.append(f"  ⚡ No strong momentum signals today")
-
     if news and news.get("mentions"):
-        m_str=" · ".join(f"{t}×{c}" for t,c in news["mentions"].items())
-        L.append(f"  📰 News mentions : {m_str}")
-
+        L.append(f"  📰 Mentions : {' · '.join(f'{t}×{c}' for t,c in news['mentions'].items())}")
     if news and news.get("headlines"):
-        L.append(f"  📢 Bullish headlines:")
+        L.append(f"  📢 Bullish news:")
         for h in news["headlines"]:
-            short=h[:65]+"..." if len(h)>65 else h
-            L.append(f"    • {short}")
-
+            L.append(f"    • {h[:65]+'...' if len(h)>65 else h}")
     if watch_px:
         L+=[f"",f"<b>👀 Watchlist</b>"]
         for t,p in watch_px.items():
             h24=p.get("h24",0); d7=p.get("d7",0)
             em="🟢" if h24>=3 else "🔴" if h24<=-3 else "⚪"
             L.append(f"  {em} {t:<5} S${p['sgd']:.3f}  24h {h24:+.1f}%  7d {d7:+.1f}%")
-
-    ENTRY_RULE={
-        "expansion":   "✅ Early entries: OK on strong momentum + volume signals",
+    ENTRY={
+        "expansion":   "✅ Early entries: OK on strong momentum signals",
         "caution":     "⚠️  Early entries: Watchlist only — wait for regime shift",
         "contraction": "❌ Early entries: Avoid all new positions",
-        "recovery":    "🔵 Early entries: Small size only — set tight stop-loss",
+        "recovery":    "🔵 Early entries: Small size only — tight stop-loss",
     }
     AD={
         "expansion":   "🚀 Conditions bullish. Hold and trim into targets.",
@@ -411,31 +363,18 @@ def build(reg, conf, f, g, sigs, tot, up, alts,
         "contraction": "🔒 Capital preservation. Respect stop-losses now.",
         "recovery":    "👀 Early recovery. Small entries on confirmed signals only.",
     }
-    L+=[f"",f"💡 {AD.get(reg,'')}",
-        f"{ENTRY_RULE.get(reg,'')}",
+    L+=[f"",f"💡 {AD.get(reg,'')}",f"{ENTRY.get(reg,'')}",
         f"",f"<i>Analytics only. Not financial advice.</i>"]
     return "\n".join(L)
 
 def main():
     print(f"SGT: {sgt()}")
-    print("Fetching prices (markets endpoint)...")
-    port_px, watch_px = fetch_prices()
-    print(f"  Portfolio coins: {list(port_px.keys())}")
-    print(f"  Watchlist coins: {list(watch_px.keys())}")
-
-    # Show sample data to confirm 7d is working
-    if "ETH" in port_px:
-        e=port_px["ETH"]
-        print(f"  ETH: SGD={e['sgd']:.2f} 24h={e['h24']:+.2f}% 7d={e['d7']:+.2f}%")
-
-    f=fetch_fg()
-    g=fetch_glb()
-    news=fetch_news()
-    trending=fetch_trending()
-
+    print(f"CG API key: {'SET ✓' if CG_KEY else 'NOT SET ✗'}")
+    port_px,watch_px = fetch_prices()
+    f=fetch_fg(); g=fetch_glb()
+    news=fetch_news(); trending=fetch_trending()
     reg,conf=regime(port_px,f,g)
     print(f"Regime: {reg.upper()} ({conf}%)")
-
     sigs=[]
     for t,pos in PORT.items():
         s=score_coin(t,pos,port_px,f,reg)
@@ -443,14 +382,9 @@ def main():
             sigs.append(s)
             print(f"  {t:<6} {s['sc']:>5.1f}/100  {s['act']:<12}  "
                   f"P&L {s['pnl']:+.0f}%  24h {s['h24']:+.1f}%  7d {s['d7']:+.1f}%")
-
     signals=early_signals(watch_px)
     tot,up,hold,alts=port_val(port_px)
     print(f"Total: S${tot:,.2f}  USDT {up}%  Alerts: {len(alts)}")
-    if trending: print(f"Trending: {[t['sym'] for t in trending]}")
-    if signals:  print(f"Early signals: {[s['t'] for s in signals]}")
-    if news:     print(f"News: {news['label']} mentions={news['mentions']}")
-
     msg=build(reg,conf,f,g,sigs,tot,up,alts,news,trending,signals,watch_px)
     tg(msg)
     print("Done.")
