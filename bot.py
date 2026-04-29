@@ -47,18 +47,34 @@ WATCHLIST_SYMS = {"SOL","BNB","AVAX","LINK"}
 
 # SGD/USD rate — fetch live
 def get_sgd_rate():
+    """Get live SGD/USD rate. Try multiple sources with fallback."""
+    # Try ExchangeRate API (free, no key)
     try:
         r = requests.get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids":"tether","vs_currencies":"sgd"},
-            headers={"User-Agent":"CryptoPilotAI/6.0"},
-            timeout=10
+            "https://open.er-api.com/v6/latest/USD",
+            timeout=8, headers={"User-Agent":"CryptoPilotAI/6.0"}
         )
         if r.status_code == 200:
-            rate = r.json().get("tether",{}).get("sgd", 1.35)
-            return float(rate)
+            rate = r.json().get("rates",{}).get("SGD", 0)
+            if rate > 1.2:
+                print(f"  SGD rate from ExchangeRate: {rate}")
+                return float(rate)
     except: pass
-    return 1.35  # fallback SGD/USD
+    # Try Frankfurter API (free, no key)
+    try:
+        r = requests.get(
+            "https://api.frankfurter.app/latest?from=USD&to=SGD",
+            timeout=8, headers={"User-Agent":"CryptoPilotAI/6.0"}
+        )
+        if r.status_code == 200:
+            rate = r.json().get("rates",{}).get("SGD", 0)
+            if rate > 1.2:
+                print(f"  SGD rate from Frankfurter: {rate}")
+                return float(rate)
+    except: pass
+    # Hardcoded fallback (update monthly if needed)
+    print("  SGD rate: using fallback 1.35")
+    return 1.35
 
 RE = {"expansion":"🟢","caution":"🟡","contraction":"🔴","recovery":"🔵"}
 AE = {"ACCUMULATE":"🟢","HOLD":"🔵","WATCH":"🟡","TRIM":"🟠","DE-RISK":"🔴"}
@@ -108,8 +124,15 @@ def fetch_prices():
     px = {}
     all_syms = {**{k:v for k,v in BINANCE_SYMBOLS.items()}}
 
+    if not ticker_map:
+        print("  [warn] Binance ticker fetch failed — no data")
+    else:
+        print(f"  Binance: got {len(ticker_map)} tickers")
+
     for ticker, sym in all_syms.items():
         t24 = ticker_map.get(sym, {})
+        if not t24:
+            print(f"  [warn] {sym} not found in Binance response")
         price_usd = float(t24.get("lastPrice", 0) or 0)
         h24 = float(t24.get("priceChangePercent", 0) or 0)
         vol = float(t24.get("quoteVolume", 0) or 0)
