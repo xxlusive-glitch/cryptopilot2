@@ -20,4 +20,4 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           CG_API_KEY: ${{ secrets.CG_API_KEY }}
-        run: python bot.py
+        run: python signal.py
